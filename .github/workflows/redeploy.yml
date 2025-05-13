@@ -37,16 +37,18 @@ jobs:
           curl -X POST \
             -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
             -H "Content-Type: application/json" \
-            "https://api.render.com/v1/services/web/ ${{ secrets.RENDER_SERVICE_ID }}/deploys"
+            "https://api.render.com/v1/services/web/${{ secrets.RENDER_SERVICE_ID }}/deploys"
 
       - name: Notify Telegram
         if: always()
         run: |
           STATUS="${{ job.status }}"
-          MESSAGE="🔄 *CB-Auto Deployment Status*\n\n⏱ Scheduled Job Run: $(date)\n🚦 Status: $STATUS"
+          TIMESTAMP=$(date)
+          MESSAGE="🔄 *CB-Auto Deployment Status*\n\n⏱ Scheduled Job Run: $TIMESTAMP\n🚦 Status: $STATUS"
 
           curl -s -X POST \
-            "https://api.telegram.org/bot ${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.AUTHORIZED_USERS }}" \
             -d "text=$MESSAGE" \
             -d "parse_mode=Markdown"
+
