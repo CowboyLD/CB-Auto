@@ -43,7 +43,7 @@ jobs:
         if: always()
         run: |
           STATUS="${{ job.status }}"
-          MESSAGE="🔄 *CB-Auto Deployment Status*\n\n⏱ Scheduled Job Run: $(date)\n🚦 Status: \$STATUS"
+          MESSAGE="🔄 *CB-Auto Deployment Status*\n\n⏱ Scheduled Job Run: $(date)\n🚦 Status: $STATUS"
 
           curl -s -X POST \
             "https://api.telegram.org/bot ${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
