@@ -32,6 +32,6 @@ jobs:
       if: always()
       run: |
         curl -s -X POST \
-          "https://api.telegram.org/bot7908113246:AAF3TyHVodYCr8Fc1qOczi0FOj5XqtJhevc/sendMessage" \
+          "https://api.telegram.org/bot8163541205:AAG9ynWhnjNyfgNxmi3-WoM0upABWn-gYNQ/sendMessage" \
           -d "chat_id=${{ secrets.AUTHORIZED_USERS }}" \
           -d "text=🔄 Deployment status: ${{ job.status }}"
