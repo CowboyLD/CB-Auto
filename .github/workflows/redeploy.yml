@@ -1,0 +1,37 @@
+name: 24/7 Monitor & Redeploy
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Every 5 minutes
+
+jobs:
+  ensure-availability:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check Health
+      id: health-check
+      run: |
+        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://automate-scan-bot.onrender.com/healthz)
+        echo "Health status: $RESPONSE"
+        
+        if [ "$RESPONSE" -ne 200 ]; then
+          echo "status=unhealthy" >> $GITHUB_OUTPUT
+        else
+          echo "status=healthy" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Redeploy if Unhealthy
+      if: steps.health-check.outputs.status == 'unhealthy'
+      run: |
+        curl -X POST \
+          -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          "https://api.render.com/v1/services/web/${{ secrets.RENDER_SERVICE_ID }}/deploys"
+        
+    - name: Notify Telegram
+      if: always()
+      run: |
+        curl -s -X POST \
+          "https://api.telegram.org/bot7908113246:AAF3TyHVodYCr8Fc1qOczi0FOj5XqtJhevc/sendMessage" \
+          -d "chat_id=${{ secrets.AUTHORIZED_USERS }}" \
+          -d "text=🔄 Deployment status: ${{ job.status }}"
