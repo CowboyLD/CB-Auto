@@ -48,7 +48,7 @@ jobs:
           EMOJI="✅"
           if [ "$STATUS" != "success" ]; then EMOJI="❌"; fi
 
-          TIMESTAMP=$(date -u)
+          TIMESTAMP=$(TZ="Asia/Phnom_Penh" date '+%a %b %d %T %Z %Y')
           END_TIME=$(date +%s)
           START_TIME=${{ steps.start.outputs.start_time }}
           DURATION=$((END_TIME - START_TIME))
