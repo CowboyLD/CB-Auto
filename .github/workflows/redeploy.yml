@@ -11,7 +11,7 @@ jobs:
     - name: Check Health
       id: health-check
       run: |
-        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://automate-scan-bot.onrender.com/healthz)
+        RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://cb-auto.onrender.com/healthz)
         echo "Health status: $RESPONSE"
         
         if [ "$RESPONSE" -ne 200 ]; then
