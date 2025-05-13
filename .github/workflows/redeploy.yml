@@ -44,7 +44,12 @@ jobs:
         run: |
           STATUS="${{ job.status }}"
           TIMESTAMP=$(date)
-          MESSAGE="🔄 *CB-Auto Deployment Status*\n\n⏱ Scheduled Job Run: $TIMESTAMP\n🚦 Status: $STATUS"
+          MESSAGE=$(cat <<EOF
+🔄 *CB-Auto Deployment Status*
+⏱ Scheduled Job Run: $TIMESTAMP
+🚦 Status: $STATUS
+EOF
+)
 
           curl -s -X POST \
             "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
