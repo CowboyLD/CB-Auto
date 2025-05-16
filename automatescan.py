@@ -18,6 +18,8 @@ import math
 import random
 from telegram import BotCommand
 from math import radians, sin, cos, sqrt, atan2
+from asyncio import Task
+import asyncio
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """
@@ -47,6 +49,8 @@ TIMEZONE = pytz.timezone('Asia/Bangkok')
 BASE_LATITUDE = float(os.getenv('BASE_LATITUDE', '11.545380'))
 BASE_LONGITUDE = float(os.getenv('BASE_LONGITUDE', '104.911449'))
 MAX_DEVIATION_METERS = 150
+
+user_scan_tasks = {}
 
 # Configure logging
 logging.basicConfig(
@@ -101,6 +105,17 @@ def create_driver():
     })
     
     return driver, (lat, lon)
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    chat_id = update.effective_chat.id
+
+    task = user_scan_tasks.get(user_id)
+    if task and not task.done():
+        task.cancel()
+        await context.bot.send_message(chat_id, "⛔ Cancelling scan-in process...")
+    else:
+        await context.bot.send_message(chat_id, "ℹ️ No active scan-in process to cancel.")
 
 async def perform_scan_in(bot, chat_id):
     driver, (lat, lon) = create_driver()
@@ -235,36 +250,53 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle scanin command"""
     user_id = str(update.effective_user.id)
     chat_id = update.effective_chat.id
-    
+
     if user_id not in AUTHORIZED_USERS:
         await update.message.reply_text("❌ You are not authorized to use this bot")
         return
 
-    try:
-        await context.bot.send_message(chat_id, "⏳ Starting scan process...")
-        success = await perform_scan_in(context.bot, chat_id)
-        
-        if success:
-            await context.bot.send_message(chat_id, "✅ Scan-in process completed successfully!")
-        else:
-            await context.bot.send_message(chat_id, "❌ Scan-in failed. Check previous messages for details.")
-            
-    except Exception as e:
-        await context.bot.send_message(chat_id, f"⚠️ Critical error: {str(e)}")
-        logger.error(traceback.format_exc())
+    if user_id in user_scan_tasks and not user_scan_tasks[user_id].done():
+        await update.message.reply_text("⚠️ A scan is already in progress. Use /cancel to stop it.")
+        return
+
+    # 🆕 New async task wrapper
+    async def scan_task():
+        try:
+            await context.bot.send_message(chat_id, "⏳ Starting scan process...")
+            success = await perform_scan_in(context.bot, chat_id)
+
+            if success:
+                await context.bot.send_message(chat_id, "✅ Scan-in process completed successfully!")
+            else:
+                await context.bot.send_message(chat_id, "❌ Scan-in failed.")
+        except asyncio.CancelledError:
+            await context.bot.send_message(chat_id, "🚫 Scan-in was cancelled.")
+        except Exception as e:
+            await context.bot.send_message(chat_id, f"⚠️ Critical error: {str(e)}")
+            logger.error(traceback.format_exc())
+        finally:
+            # ✅ Clean up
+            for uid, task in list(user_scan_tasks.items()):
+                if task.done():
+                    del user_scan_tasks[uid]
+
+    # 🚀 Start the background task
+    task = asyncio.create_task(scan_task())
+    user_scan_tasks[user_id] = task
 
 def main():
     """Start the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("scanin", scanin))
+    application.add_handler(CommandHandler("cancel", cancel))
     async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Show welcome message"),
-            BotCommand("scanin", "Initiate attendance scan")
+            BotCommand("scanin", "Initiate attendance scan"),
+            BotCommand("cancel", "Cancel an ongoing scan-in")
         ])
     application.post_init = post_init
     application.run_polling()
