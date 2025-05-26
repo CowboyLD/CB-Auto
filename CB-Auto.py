@@ -267,13 +267,13 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         driver = None
         try:
             # 1. Instant driver creation FIRST
-            driver = create_driver()[0]
+            driver, _ = create_driver()
             user_drivers[user_id] = driver
             logger.info(f"Driver ready for {user_id}")
 
             # 2. Start scan process
             await context.bot.send_message(chat_id, "⏳ Starting scan...")
-            success = await perform_scan_in(context.bot, chat_id, user_id, {"cancelled": False)
+            success = await perform_scan_in(context.bot, chat_id, user_id, {"cancelled": False})
             
             if success:
                 await context.bot.send_message(chat_id, "✅ Done!")
@@ -282,7 +282,7 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await cancellation_handler(context, chat_id, user_id)
             
         finally:
-            await cleanup(user_id)
+            await force_cleanup(user_id)
 
     task = asyncio.create_task(scan_task())
     user_scan_tasks[user_id] = task
@@ -301,6 +301,7 @@ async def cancellation_handler(context, chat_id, user_id):
         # Stabilize browser state
         WebDriverWait(driver, 5).until(
             EC.visibility_of_element_located((By.TAG_NAME, "body"))
+        )
         driver.execute_script("document.body.style.background = '#ffffff';")
         
         # Force render completion
@@ -311,14 +312,24 @@ async def cancellation_handler(context, chat_id, user_id):
         time.sleep(0.3)
         
         # Capture and send
-        with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            # 1. Capture screenshot
             driver.save_screenshot(tmp.name)
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=open(tmp.name, 'rb'),
-                caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
-            )
             
+            # 2. Close file handle before reading
+            tmp.close()
+            
+            # 3. Send with caption
+            with open(tmp.name, 'rb') as f:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=f,
+                    caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+                )
+            
+            # 4. Cleanup
+            os.unlink(tmp.name)
+
         # Final message
         await context.bot.send_message(chat_id, "🔴 Terminated")
 
