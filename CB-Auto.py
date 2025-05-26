@@ -266,79 +266,99 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def scan_task():
         driver = None
         try:
-            # 1. Instant driver creation FIRST
+            # 1. Create and store driver FIRST
             driver, _ = create_driver()
             user_drivers[user_id] = driver
-            logger.info(f"Driver ready for {user_id}")
-
+            logger.info(f"Driver stored for {user_id}")
+            
             # 2. Start scan process
             await context.bot.send_message(chat_id, "⏳ Starting scan...")
             success = await perform_scan_in(context.bot, chat_id, user_id, {"cancelled": False})
-            
-            if success:
-                await context.bot.send_message(chat_id, "✅ Done!")
-
+    
         except asyncio.CancelledError:
             await cancellation_handler(context, chat_id, user_id)
             
         finally:
-            await force_cleanup(user_id)
+            await safe_cleanup(user_id)
 
     task = asyncio.create_task(scan_task())
     user_scan_tasks[user_id] = task
 
 async def cancellation_handler(context, chat_id, user_id):
-    """Atomic cancellation workflow"""
+    """Guaranteed cancellation handling"""
     try:
-        # Immediate response
         await context.bot.send_message(chat_id, "⛔ Cancelling...")
         
-        # Get driver with verification
+        # 1. Triple-check driver existence
         driver = user_drivers.get(user_id)
         if not driver:
-            raise RuntimeError("No active browser")
-        
-        # Stabilize browser state
-        WebDriverWait(driver, 5).until(
-            EC.visibility_of_element_located((By.TAG_NAME, "body"))
-        )
-        driver.execute_script("document.body.style.background = '#ffffff';")
-        
-        # Force render completion
-        driver.execute_script("""
-            document.body.style.overflow = 'visible';
-            window.dispatchEvent(new Event('resize'));
-        """)
-        time.sleep(0.3)
-        
-        # Capture and send
+            # Attempt direct recovery
+            driver = await recover_driver(user_id)
+            if not driver:
+                raise RuntimeError("Browser session unrecoverable")
+
+        # 2. Forced state stabilization
+        try:
+            driver.execute_script("document.body.style.visibility = 'visible';")
+            WebDriverWait(driver, 3).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except:
+            logger.warning("State stabilization failed, proceeding anyway")
+
+        # 3. Guaranteed screenshot capture
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            # 1. Capture screenshot
             driver.save_screenshot(tmp.name)
-            
-            # 2. Close file handle before reading
             tmp.close()
             
-            # 3. Send with caption
-            with open(tmp.name, 'rb') as f:
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=f,
-                    caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
-                )
+            try:
+                with open(tmp.name, 'rb') as f:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=f,
+                        caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+                    )
+            except Exception as e:
+                logger.error(f"Photo send failed: {str(e)}")
+                await send_fallback(context, chat_id, tmp.name)
             
-            # 4. Cleanup
             os.unlink(tmp.name)
 
-        # Final message
-        await context.bot.send_message(chat_id, "🔴 Terminated")
+        await context.bot.send_message(chat_id, "🔴 Process terminated")
 
     except Exception as e:
-        logger.error(f"Cancellation failed: {str(e)}")
-        await emergency_screenshot(context, chat_id, driver)
-        
-    finally:
-        await force_cleanup(user_id)
+        logger.error(f"Cancellation failure: {str(e)}")
+        await emergency_capture(context, chat_id, user_id)
+
+async def recover_driver(user_id):
+    """Last-resort driver recovery"""
+    try:
+        # Check existing processes
+        driver = webdriver.Remote(
+            command_executor=user_drivers[user_id].command_executor._url,
+            desired_capabilities=user_drivers[user_id].capabilities
+        )
+        driver.session_id = user_drivers[user_id].session_id
+        return driver
+    except Exception as e:
+        logger.error(f"Driver recovery failed: {str(e)}")
+        return None
+
+async def safe_cleanup(user_id):
+    """Safe resource cleanup"""
+    driver = user_drivers.pop(user_id, None)
+    if driver:
+        try:
+            # 1. Capture final state
+            driver.save_screenshot(f"/tmp/last_state_{user_id}.png")
+            
+            # 2. Graceful quit
+            driver.quit()
+            
+            # 3. Force cleanup
+            os.system(f"pkill -f {driver.service.process.pid}")
+        except Exception as e:
+            logger.error(f"Cleanup error: {str(e)}")
 
 async def emergency_screenshot(context, chat_id, driver):
     """Last-resort capture"""
