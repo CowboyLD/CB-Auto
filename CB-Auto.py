@@ -113,28 +113,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     task = user_scan_tasks.get(user_id)
-    driver = user_drivers.get(chat_id)
 
     if task and not task.done():
         task.cancel()
         await context.bot.send_message(chat_id, "⛔ Cancelling scan-in process...")
-
-        if driver:
-            try:
-                timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
-                screenshot_path = f"cancelled_{timestamp}.png"
-                driver.save_screenshot(screenshot_path)
-
-                with open(screenshot_path, 'rb') as photo:
-                    await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo,
-                        caption="📸 Screenshot at cancellation point"
-                    )
-
-                os.remove(screenshot_path)
-            except Exception as e:
-                await context.bot.send_message(chat_id, f"⚠️ Could not take screenshot: {str(e)}")
     else:
         await context.bot.send_message(chat_id, "ℹ️ No active scan-in process to cancel.")
 
@@ -290,19 +272,30 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id, "⏳ Starting scan process...")
             success = await perform_scan_in(context.bot, chat_id)
-
+    
             if success:
                 await context.bot.send_message(chat_id, "✅ Scan-in process completed successfully!")
             else:
                 await context.bot.send_message(chat_id, "❌ Scan-in failed.")
         except asyncio.CancelledError:
+            driver = user_drivers.get(chat_id)
+            if driver:
+                try:
+                    timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
+                    screenshot_path = f"cancelled_{timestamp}.png"
+                    driver.save_screenshot(screenshot_path)
+    
+                    with open(screenshot_path, 'rb') as photo:
+                        await context.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=photo,
+                            caption="📸 Screenshot at cancellation point"
+                        )
+                    os.remove(screenshot_path)
+                except Exception as e:
+                    await context.bot.send_message(chat_id, f"⚠️ Could not take screenshot after cancellation: {str(e)}")
             await context.bot.send_message(chat_id, "🚫 Scan-in was cancelled.")
-        except Exception as e:
-            error_text = str(e).strip() or "Unknown error"
-            await context.bot.send_message(chat_id, f"⚠️ Critical error: {str(e)}")
-            logger.error(traceback.format_exc())
         finally:
-            # ✅ Clean up
             for uid, task in list(user_scan_tasks.items()):
                 if task.done():
                     del user_scan_tasks[uid]
