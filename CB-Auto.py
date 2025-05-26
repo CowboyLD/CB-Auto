@@ -267,46 +267,55 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id, "⏳ Starting scan process...")
             cancel_flag = {"cancelled": False}
-            success = await perform_scan_in(context.bot, chat_id, user_id, cancel_flag)  # Pass user_id
-    
+            success = await perform_scan_in(context.bot, chat_id, user_id, cancel_flag)
+            
             if success:
                 await context.bot.send_message(chat_id, "✅ Scan-in process completed successfully!")
             else:
                 await context.bot.send_message(chat_id, "❌ Scan-in failed.")
-        
+                
         except asyncio.CancelledError:
-            cancel_flag["cancelled"] = True
+            # Immediately send cancellation acknowledgement
+            await context.bot.send_message(chat_id, "⛔ Cancellation request received...")
+            
             driver = user_drivers.get(user_id)
             if driver:
                 try:
-                    # Capture screenshot
+                    # Capture current state before cleanup
                     timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
                     screenshot_path = f"cancelled_{timestamp}.png"
+                    
+                    # 1. Force page load completion
+                    driver.execute_script("return document.readyState")
+                    # 2. Add visual indicator
+                    driver.execute_script("document.body.style.border = '5px solid red'")
+                    # 3. Capture full page screenshot
                     driver.save_screenshot(screenshot_path)
                     
-                    # Send screenshot
+                    # Send with progress indicator
                     with open(screenshot_path, 'rb') as photo:
-                        await context.bot.send_photo(
+                        message = await context.bot.send_photo(
                             chat_id=chat_id,
                             photo=photo,
-                            caption="🖼 Cancellation Point Screenshot"
+                            caption="📸 Cancellation Point State",
+                            reply_to_message_id=update.message.message_id
                         )
-                    
-                    # Cleanup file
-                    os.remove(screenshot_path)
-                    
+                        if message.photo:
+                            os.remove(screenshot_path)
+                            
                 except Exception as e:
+                    logger.error(f"Cancellation screenshot error: {str(e)}")
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text=f"⚠️ Failed to capture cancellation screenshot: {str(e)}"
+                        text=f"⚠️ Failed to capture cancellation state: {str(e)}"
                     )
                 finally:
-                    # Ensure driver cleanup
+                    # Ensure cleanup even if screenshot fails
+                    driver.service.process.kill()
                     driver.quit()
                     user_drivers.pop(user_id, None)
-            
-            # Send cancellation confirmation
-            await context.bot.send_message(chat_id, "🚫 Scan-in was cancelled.")
+                    
+            await context.bot.send_message(chat_id, "🚫 Scan-in process terminated")
 
     # 🚀 Start the background task
     task = asyncio.create_task(scan_task())
