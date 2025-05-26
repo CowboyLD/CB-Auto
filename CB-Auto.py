@@ -295,7 +295,7 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # Check for visible elements as proof of load
                     WebDriverWait(driver, 5).until(
                         EC.visibility_of_element_located((By.XPATH, "//body"))
-                    
+                    )
                     # Add visual marker for confirmation
                     driver.execute_script(
                         "document.body.innerHTML += '<div style=\"position: fixed; top: 0; left: 0; background: red; color: white; padding: 10px; z-index: 9999;\">CANCELLATION POINT</div>';"
