@@ -4,3 +4,4 @@ python-dotenv==1.0.0
 pytz==2023.3
 pillow==10.0.0
 aiohttp
+psutil==5.9.5
