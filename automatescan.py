@@ -290,7 +290,6 @@ application = Application.builder().token(TELEGRAM_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("scanin", scanin))
 application.add_handler(CommandHandler("cancel", cancel))
-application.post_init = post_init
 
 # Health check route
 async def handle_health_check(request):
