@@ -115,8 +115,26 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = user_scan_tasks.get(user_id)
 
     if task and not task.done():
-        task.cancel()
         await context.bot.send_message(chat_id, "⛔ Cancelling scan-in process...")
+        task.cancel()
+
+        driver = user_drivers.get(user_id)
+        if driver:
+            timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
+            screenshot_path = f"cancelled_{timestamp}.png"
+            driver.save_screenshot(screenshot_path)
+
+            with open(screenshot_path, "rb") as photo:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=f"🚫 Operation cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')} (ICT)"
+                )
+
+            driver.quit()
+            user_drivers.pop(user_id, None)
+        else:
+            await context.bot.send_message(chat_id, "⚠️ No active browser session found.")
     else:
         await context.bot.send_message(chat_id, "ℹ️ No active scan-in process to cancel.")
 
