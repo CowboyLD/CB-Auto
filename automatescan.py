@@ -223,7 +223,8 @@ async def perform_scan_in(bot, chat_id):
 
     except Exception as e:
         error_time = datetime.now(TIMEZONE).strftime("%H:%M:%S")
-        await bot.send_message(chat_id, f"❌ Failed at {error_time} (ICT): {str(e)}")
+        error_text = str(e).strip() or "Unknown error"
+        await bot.send_message(chat_id, f"❌ Failed at {error_time} (ICT): {error_text}")
         logger.error(traceback.format_exc())
         
         timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
@@ -275,6 +276,7 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except asyncio.CancelledError:
             await context.bot.send_message(chat_id, "🚫 Scan-in was cancelled.")
         except Exception as e:
+            error_text = str(e).strip() or "Unknown error"
             await context.bot.send_message(chat_id, f"⚠️ Critical error: {str(e)}")
             logger.error(traceback.format_exc())
         finally:
