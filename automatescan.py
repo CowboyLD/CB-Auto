@@ -290,7 +290,6 @@ application = Application.builder().token(TELEGRAM_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("scanin", scanin))
 application.add_handler(CommandHandler("cancel", cancel))
-application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 application.post_init = post_init
 
 # Health check route
