@@ -266,9 +266,15 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def scan_task():
         driver = None
         try:
-            # Initialize driver FIRST
-            driver, _ = create_driver()
-            user_drivers[user_id] = driver
+            # 1. IMMEDIATE DRIVER INITIALIZATION
+            driver = webdriver.Chrome(
+                service=Service('/usr/bin/chromedriver'),
+                options=create_driver_options()
+            )
+            user_drivers[user_id] = driver  # Store immediately
+            logger.info(f"Driver initialized for {user_id}")
+
+            # 2. MAIN SCAN PROCESS
             await context.bot.send_message(chat_id, "⏳ Starting scan process...")
             success = await perform_scan_in(context.bot, chat_id, user_id, {"cancelled": False})
             
@@ -276,49 +282,96 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id, "✅ Scan completed!")
 
         except asyncio.CancelledError:
-            try:
-                # 1. Immediate cancellation response
-                await context.bot.send_message(chat_id, "⛔ Cancelling...")
-                
-                # 2. Get active driver
-                driver = user_drivers.get(user_id)
-                if not driver:
-                    raise RuntimeError("No active browser session")
-                
-                # 3. Force page stabilization
-                driver.execute_script("document.body.style.background = '#fff';")
-                WebDriverWait(driver, 3).until(
-                    lambda d: d.execute_script("return document.readyState") == "complete"
-                )
-                
-                # 4. Capture and send screenshot
-                screenshot_path = f"/tmp/{user_id}_cancel.png"
-                driver.save_screenshot(screenshot_path)
-                
-                with open(screenshot_path, 'rb') as photo:
-                    await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=photo,
-                        caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
-                    )
-                
-                # 5. Final confirmation
-                await context.bot.send_message(chat_id, "🔴 Process terminated")
-
-            except Exception as e:
-                logger.error(f"Cancellation failed: {str(e)}")
-                await context.bot.send_message(chat_id, "⚠️ Failed to capture final state")
-
-            finally:
-                if driver:
-                    driver.quit()
-                    user_drivers.pop(user_id, None)
-
+            await handle_cancellation(context, chat_id, user_id)
+            
         finally:
-            user_scan_tasks.pop(user_id, None)
+            cleanup_resources(user_id)
 
     task = asyncio.create_task(scan_task())
     user_scan_tasks[user_id] = task
+
+async def handle_cancellation(context, chat_id, user_id):
+    """Guaranteed screenshot capture flow"""
+    try:
+        # 1. Immediate cancellation confirmation
+        await context.bot.send_message(chat_id, "⛔ Cancelling process...")
+        
+        # 2. Retrieve driver with verification
+        driver = user_drivers.get(user_id)
+        if not driver:
+            raise RuntimeError("No active browser session found")
+        
+        # 3. Force stable page state
+        WebDriverWait(driver, 5).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        
+        # 4. Visual confirmation marker
+        driver.execute_script(
+            "document.body.innerHTML += '<div style=\"position: fixed; top: 10px; left: 10px; background: red; color: white; padding: 5px; z-index: 9999;\">CANCELLED</div>';"
+        )
+        time.sleep(0.5)  # Allow DOM update
+        
+        # 5. Guaranteed screenshot capture
+        screenshot_path = f"/tmp/{user_id}_cancel_{datetime.now().timestamp()}.png"
+        driver.save_screenshot(screenshot_path)
+        
+        # 6. Verify screenshot content
+        if os.path.getsize(screenshot_path) < 1024:
+            raise ValueError("Empty screenshot file")
+            
+        # 7. Send with verification
+        with open(screenshot_path, 'rb') as photo:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+            )
+        
+        # 8. Final confirmation
+        await context.bot.send_message(chat_id, "🔴 Process terminated")
+
+    except Exception as e:
+        logger.error(f"Cancellation error: {str(e)}")
+        await send_fallback_screenshot(context, chat_id, driver)
+        
+    finally:
+        cleanup_driver(user_id)
+
+def create_driver_options():
+    """Centralized driver configuration"""
+    options = Options()
+    options.binary_location = '/usr/bin/chromium'
+    options.add_argument('--headless=new')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080')
+    options.add_experimental_option("prefs", {
+        "profile.default_content_setting_values.geolocation": 1,
+    })
+    return options
+
+async def send_fallback_screenshot(context, chat_id, driver):
+    """Emergency screenshot handler"""
+    try:
+        if driver:
+            driver.save_screenshot("/tmp/emergency.png")
+            with open("/tmp/emergency.png", "rb") as f:
+                await context.bot.send_document(chat_id, document=f)
+    except Exception as e:
+        logger.error(f"Fallback screenshot failed: {str(e)}")
+        await context.bot.send_message(chat_id, "⚠️ Failed to capture any state")
+
+def cleanup_driver(user_id):
+    """Guaranteed resource cleanup"""
+    driver = user_drivers.pop(user_id, None)
+    if driver:
+        try:
+            driver.service.process.kill()
+        except Exception as e:
+            logger.warning(f"Process kill warning: {str(e)}")
+        finally:
+            driver.quit()
 
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
