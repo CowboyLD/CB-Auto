@@ -20,6 +20,7 @@ from telegram import BotCommand
 from math import radians, sin, cos, sqrt, atan2
 from asyncio import Task
 import asyncio
+from aiohttp import web
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """
