@@ -276,10 +276,22 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         except asyncio.CancelledError:
             cancel_flag["cancelled"] = True
-            driver = user_drivers.get(user_id)  # Retrieve using user_id
+            driver = user_drivers.get(user_id)
             if driver:
                 try:
-                    # ... [screenshot capturing code] ...
+                    timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
+                    screenshot_path = f"cancelled_{timestamp}.png"
+                    driver.save_screenshot(screenshot_path)
+                    
+                    with open(screenshot_path, 'rb') as photo:
+                        await context.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=photo,
+                            caption="📸 Screenshot at cancellation point"
+                        )
+                    os.remove(screenshot_path)
+                except Exception as e:
+                    await context.bot.send_message(chat_id, f"⚠️ Could not take screenshot after cancellation: {str(e)}")
                 finally:
                     driver.quit()
                     user_drivers.pop(user_id, None)
