@@ -245,7 +245,7 @@ async def perform_scan_in(bot, chat_id):
                 os.remove(screenshot_file)
             except Exception as e:
                 logger.error(f"Error cleaning screenshot: {str(e)}")
-        user_drivers.pop(chat_id)
+        user_drivers.pop(chat_id, None)
         driver.quit()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,7 +284,7 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     timestamp = datetime.now(TIMEZONE).strftime("%Y%m%d-%H%M%S")
                     screenshot_path = f"cancelled_{timestamp}.png"
                     driver.save_screenshot(screenshot_path)
-    
+        
                     with open(screenshot_path, 'rb') as photo:
                         await context.bot.send_photo(
                             chat_id=chat_id,
