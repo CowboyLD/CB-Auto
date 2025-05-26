@@ -256,107 +256,63 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if user_id not in AUTHORIZED_USERS:
-        await update.message.reply_text("❌ You are not authorized to use this bot")
+        await update.message.reply_text("❌ Unauthorized")
         return
 
     if user_id in user_scan_tasks and not user_scan_tasks[user_id].done():
-        await update.message.reply_text("⚠️ A scan is already in progress. Use /cancel to stop it.")
+        await update.message.reply_text("⚠️ Scan in progress. Use /cancel")
         return
 
     async def scan_task():
-        cancel_flag = {"cancelled": False}
         driver = None
         try:
-            # Initialize driver with explicit page load timeout
+            # Initialize driver FIRST
             driver, _ = create_driver()
-            driver.set_page_load_timeout(30)  # 30 seconds timeout
             user_drivers[user_id] = driver
-            
             await context.bot.send_message(chat_id, "⏳ Starting scan process...")
-            success = await perform_scan_in(context.bot, chat_id, user_id, cancel_flag)
+            success = await perform_scan_in(context.bot, chat_id, user_id, {"cancelled": False})
             
             if success:
-                await context.bot.send_message(chat_id, "✅ Scan completed successfully!")
-            else:
-                await context.bot.send_message(chat_id, "❌ Scan failed.")
+                await context.bot.send_message(chat_id, "✅ Scan completed!")
 
         except asyncio.CancelledError:
             try:
-                # Initial cancellation acknowledgement
-                msg = await context.bot.send_message(chat_id, "📸 Capturing process state...")
+                # 1. Immediate cancellation response
+                await context.bot.send_message(chat_id, "⛔ Cancelling...")
                 
-                # 1. Verify driver availability
+                # 2. Get active driver
                 driver = user_drivers.get(user_id)
                 if not driver:
-                    raise RuntimeError("Browser session not found")
-
-                # 2. Wait for stable page state
-                try:
-                    # Check for visible elements as proof of load
-                    WebDriverWait(driver, 5).until(
-                        EC.visibility_of_element_located((By.XPATH, "//body"))
-                    )
-                    # Add visual marker for confirmation
-                    driver.execute_script(
-                        "document.body.innerHTML += '<div style=\"position: fixed; top: 0; left: 0; background: red; color: white; padding: 10px; z-index: 9999;\">CANCELLATION POINT</div>';"
-                    )
-                    time.sleep(0.5)  # Allow DOM update
-                except:
-                    logger.warning("Page not in stable state for screenshot")
-
-                # 3. Capture screenshot with verification
-                screenshot_path = f"/tmp/cancelled_{datetime.now(TIMEZONE).timestamp()}.png"
+                    raise RuntimeError("No active browser session")
                 
-                # Full page screenshot technique
-                total_height = driver.execute_script("return document.body.parentNode.scrollHeight")
-                driver.set_window_size(1920, total_height)
+                # 3. Force page stabilization
+                driver.execute_script("document.body.style.background = '#fff';")
+                WebDriverWait(driver, 3).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                
+                # 4. Capture and send screenshot
+                screenshot_path = f"/tmp/{user_id}_cancel.png"
                 driver.save_screenshot(screenshot_path)
-
-                # 4. Verify screenshot content
-                if os.path.getsize(screenshot_path) < 1024:  # Check if file is empty
-                    raise ValueError("Screenshot file is corrupted")
-
-                # 5. Send with content analysis
+                
                 with open(screenshot_path, 'rb') as photo:
-                    await msg.edit_text("🖼 Sending cancellation proof...")
-                    sent_msg = await context.bot.send_photo(
+                    await context.bot.send_photo(
                         chat_id=chat_id,
                         photo=photo,
-                        caption=f"🚫 Cancelled mid-process at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}",
-                        reply_to_message_id=msg.message_id
+                        caption=f"🚫 Cancelled at {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
                     )
-                    
-                    # Verify photo transmission
-                    if not sent_msg.photo:
-                        raise RuntimeError("Failed to send screenshot")
-
-                os.remove(screenshot_path)
+                
+                # 5. Final confirmation
+                await context.bot.send_message(chat_id, "🔴 Process terminated")
 
             except Exception as e:
-                logger.error(f"Cancellation error: {str(e)}")
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⚠️ Failed to capture meaningful state: {str(e)}"
-                )
+                logger.error(f"Cancellation failed: {str(e)}")
+                await context.bot.send_message(chat_id, "⚠️ Failed to capture final state")
 
             finally:
-                # Cleanup with diagnostics
                 if driver:
-                    try:
-                        # Capture final page source for debugging
-                        page_source = driver.page_source
-                        if len(page_source) < 1024:
-                            logger.warning("Truncated page source captured")
-                            
-                        # Force cleanup
-                        driver.service.process.kill()
-                    except Exception as e:
-                        logger.error(f"Cleanup error: {str(e)}")
-                    finally:
-                        driver.quit()
-                        user_drivers.pop(user_id, None)
-                
-                await context.bot.send_message(chat_id, "🔴 Process terminated")
+                    driver.quit()
+                    user_drivers.pop(user_id, None)
 
         finally:
             user_scan_tasks.pop(user_id, None)
