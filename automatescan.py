@@ -286,36 +286,67 @@ async def scanin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = asyncio.create_task(scan_task())
     user_scan_tasks[user_id] = task
 
-def main():
-    """Start the bot"""
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("scanin", scanin))
-    application.add_handler(CommandHandler("cancel", cancel))
-    async def post_init(application):
-        await application.bot.set_my_commands([
-            BotCommand("start", "Show welcome message"),
-            BotCommand("scanin", "Initiate attendance scan"),
-            BotCommand("cancel", "Cancel an ongoing scan-in")
-        ])
-    application.post_init = post_init
-    application.run_polling()
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/healthz':
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'OK')
-        else:
-            self.send_response(404)
-            self.end_headers()
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("scanin", scanin))
+application.add_handler(CommandHandler("cancel", cancel))
+application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+application.post_init = post_init
 
-def run_health_server():
-    server = HTTPServer(('0.0.0.0', 8000), HealthHandler)
-    print("Health check server running on port 8000")
-    server.serve_forever()
+# Health check route
+async def handle_health_check(request):
+    return web.Response(text="OK")
+
+# Telegram webhook route
+async def handle_telegram_webhook(request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return web.Response(text="OK")
+    
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+    
+async def main():
+    await application.initialize()
+    
+    # Create web application
+    app = web.Application()
+    app.router.add_get("/", handle_root)  # Add this line
+    app.router.add_get("/healthz", handle_health_check)
+    app.router.add_post("/webhook", handle_telegram_webhook)  # Changed endpoint
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Get port from environment (Render provides this)
+    port = int(os.getenv("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    
+    # Set webhook with proper URL
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if not webhook_url:
+        raise ValueError("WEBHOOK_URL environment variable not set")
+    
+    # Verify webhook setup
+    await application.bot.set_webhook(
+        url=webhook_url,
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+    
+    # Verify webhook was set
+    webhook_info = await application.bot.get_webhook_info()
+    logger.info(f"Webhook Info: {webhook_info}")
+    
+    if webhook_info.url != webhook_url:
+        logger.error(f"Webhook URL mismatch: {webhook_info.url} != {webhook_url}")
+    else:
+        logger.info("✅ Webhook successfully set")
+    
+    # Keep application running
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
-    main()
+    asyncio.run(main())
